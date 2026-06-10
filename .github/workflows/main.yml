@@ -1,4 +1,4 @@
-name: Build Kernel GKI with Clang-r547379 + Options
+- name: Build Kernel GKI with Clang-r547379 + Options
 
 on:
   workflow_dispatch:
