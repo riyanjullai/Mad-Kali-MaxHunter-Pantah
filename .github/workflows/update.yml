@@ -1,0 +1,165 @@
+name: Build Kernel GKI with Clang-r547379 + Options
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_kernelsu:
+        description: 'Build with KernelSU-Next'
+        required: true
+        default: 'true'
+        type: boolean
+      build_lindroid:
+        description: 'Build with Lindroid DRM'
+        required: true
+        default: 'true'
+        type: boolean
+      build_lxc:
+        description: 'Enable LXC configs'
+        required: true
+        default: 'false'
+        type: boolean
+      build_docker:
+        description: 'Enable Docker configs'
+        required: true
+        default: 'false'
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DEFCONFIG: gs201_defconfig
+      ZIPNAME: Kernel-A13-GoPix-7-Series-KSu-next.zip
+      KBUILD_BUILD_USER: "@beluga"
+      KBUILD_BUILD_HOST: "Ubuntu-Linux"
+      PATCH_REPO: Linux-on-droid/lindroid-drm-loopback
+      KERNEL_NAME: kernel
+
+    steps:
+    - name: Checkout Kernel
+      uses: actions/checkout@v3
+      with:
+        repository: RONNIE158/android_kernel_google_gs201
+        ref: 13.0.0-sultan
+        path: ${{ env.KERNEL_NAME }}
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y bc bison build-essential flex lld \
+          libssl-dev libncurses5-dev libncursesw5-dev \
+          python3 python3-pip rsync zip \
+          binutils-aarch64-linux-gnu binutils-arm-linux-gnueabi \
+          gcc-aarch64-linux-gnu gcc g++ git curl wget unzip \
+          libelf-dev dwarves device-tree-compiler clang llvm lz4 xz-utils zstd     
+
+    - name: Download Clang-r547379
+      run: |
+        mkdir -p ${{ github.workspace }}/clang-r547379
+        wget -P ${{ github.workspace }}/clang-r547379/ https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r547379.tar.gz
+        tar -xf ${{ github.workspace }}/clang-r547379/clang-r547379.tar.gz -C ${{ github.workspace }}/clang-r547379/
+        rm -f ${{ github.workspace }}/clang-r547379/clang-r547379.tar.gz
+        echo "${{ github.workspace }}/clang-r547379/bin" >> $GITHUB_PATH
+
+    - name: Set up AnyKernel
+      run: |
+        if [ ! -d ${{ github.workspace }}/anykernel ]; then
+          git clone https://github.com/sudoyottaxbyte/any_kernel.git ${{ github.workspace }}/anykernel
+        fi
+
+    - name: Apply Lindroid DRM Patch
+      if: ${{ github.event.inputs.build_lindroid == 'true' }}
+      run: |
+        cd ${{ env.KERNEL_NAME }}
+        echo 'obj-y += lindroid-drm/' >> drivers/Makefile
+        echo 'source "drivers/lindroid-drm/Kconfig"' >> drivers/Kconfig
+        git clone https://github.com/${{ env.PATCH_REPO }} ../drm-dkms
+        cp -r ../drm-dkms drivers/lindroid-drm    
+
+    - name: Setup KernelSU-Next
+      if: ${{ github.event.inputs.build_kernelsu == 'true' }}
+      working-directory: ${{ env.KERNEL_NAME }}
+      run: |
+        # Apply KernelSU-Next patches
+        curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -
+
+    - name: Enable LXC configs
+      if: ${{ github.event.inputs.build_lxc == 'true' }}
+      working-directory: ${{ env.KERNEL_NAME }}
+      run: |
+        echo "⚙️ Enabling LXC configs..."
+        echo "CONFIG_NAMESPACES=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_UTS_NS=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_IPC_NS=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_USER_NS=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_PID_NS=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_NET_NS=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_CHECKPOINT_RESTORE=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_SYSVIPC=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+    - name: Enable Docker configs
+      if: ${{ github.event.inputs.build_docker == 'true' }}
+      working-directory: ${{ env.KERNEL_NAME }}
+      run: |
+        echo "⚙️ Enabling Docker configs..."
+        echo "CONFIG_USER_NS=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_CGROUPS=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_CGROUP_FREEZER=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_CGROUP_DEVICE=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_CGROUP_CPUACCT=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_CGROUP_PERF=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_CGROUP_SCHED=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_CGROUP_BPF=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_CGROUP_PIDS=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_CPUSETS=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_IP_VS=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_MEMCG_SWAP=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_BLK_CGROUP=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_CGROUP_NET_PRIO=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_CGROUP_NET_CLASSID=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_VETH=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_BRIDGE=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_NETFILTER=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_NF_NAT=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_POSIX_MQUEUE=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_SECCOMP=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_KEYS=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_PACKET_DIAG=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_UNIX_DIAG=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_INET_DIAG=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}
+        echo "CONFIG_NETLINK_DIAG=y" >> arch/arm64/configs/${{ env.DEFCONFIG }}    
+
+    - name: Build Kernel
+      run: |
+        cd ${{ env.KERNEL_NAME }}
+        mkdir -p out
+        make O=out ARCH=arm64 ${{ env.DEFCONFIG }}
+        make -j$(nproc) O=out ARCH=arm64 \
+          CC=clang LD=ld.lld AR=llvm-ar AS=llvm-as NM=llvm-nm \
+          OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip \
+          CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+          LLVM=1 LLVM_IAS=1 LTO=none CHECKSYSCALLS=n | tee build.log
+
+    - name: Verify Build
+      run: |
+        cd ${{ env.KERNEL_NAME }}
+        ok=true
+        if [ "${{ github.event.inputs.build_lindroid }}" == "true" ] && ! grep -q "AR      drivers/lindroid-drm/built-in.a" build.log; then ok=false; fi
+        if [ "${{ github.event.inputs.build_kernelsu }}" == "true" ] && ! grep -q "AR      drivers/kernelsu/built-in.a" build.log; then ok=false; fi
+        if [ "$ok" = true ]; then echo "✅ Build successful"; else echo "❌ Build failed"; exit 1; fi
+
+    - name: Prepare AnyKernel
+      run: |
+        cp ${{ env.KERNEL_NAME }}/out/arch/arm64/boot/Image.lz4 anykernel/
+        cp ${{ env.KERNEL_NAME }}/out/arch/arm64/boot/dts/google/dtbo.img anykernel/
+
+    - name: Zip Kernel
+      run: |
+        cd anykernel
+        zip -r9 $ZIPNAME *
+        mv $ZIPNAME ${{ github.workspace }}
+
+    - name: Upload Kernel ZIP
+      uses: actions/upload-artifact@v4
+      with:
+        name: kernel-zip
+        path: /home/runner/work/android_kernel_google_gs201/android_kernel_google_gs201/Kernel-A13-GoPix-7-Series-KSu-next.zip
